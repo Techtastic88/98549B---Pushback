@@ -1,3 +1,4 @@
+// HI HASAN
 #include "main.h" 
 #include "pros/misc.h"
 #include "pros/motors.h"
@@ -18,7 +19,7 @@ typedef struct MOTOR {
     pros::motor_gearset_e_t gear;
 } motor_t;
 
-typedef struct componentMaster {
+typedef struct portMaster {
     // 14 integers { sizeof(int) 14 }
     int motor_A; // drivetrain motor
     int motor_B; // drivetrain motor
@@ -34,7 +35,7 @@ typedef struct componentMaster {
     int rotational_A;
     int rotational_B;
     int coloor_Sensor;
-} comp_t;
+} port_t;
 
 int* ConfigData;
 
