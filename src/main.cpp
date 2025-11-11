@@ -1,4 +1,3 @@
-// HI HASAN asfiaeowfjieawifefawf
 #include "main.h" 
 #include "pros/misc.h"
 #include "pros/motors.h"
