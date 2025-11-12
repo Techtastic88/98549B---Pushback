@@ -41,6 +41,7 @@ static port_t port = {
     .motor_I = 0, // bottom agitator motor
     .motor_J = 0, // scoring motor
     .IMU_Sensor = 0, // intertial sensor
+    .rotational_A = 18, // rotational sensor
     .rotational_B = 0, // rotational sensor
     .colour_Sensor = 0 // colour sensor
 };
@@ -50,7 +51,6 @@ pros::Controller controller(pros::E_CONTROLLER_MASTER);
 pros::MotorGroup left_motors({port.motor_A, port.motor_B, port.motor_C}, pros::MotorGearset::blue); // left motors on ports 1, 2, 3
 pros::MotorGroup right_motors({port.motor_D, port.motor_E, port.motor_F}, pros::MotorGearset::blue); // right motors on ports 4, 5, 6
 
-static long clock = 0;
 
 void LoadConfig() {
     FILE* ConfigFile = fopen("/usd/config.bin", "a+");
@@ -67,7 +67,7 @@ void LoadConfig() {
 }
 
 void UpdateConfig() {
-    FILE* ConfigFile = fopen("/usd/config.bin", "a+");
+    FILE* ConfigFile = fopen("/usd/config.bin", "w");
 
     if (ConfigFile == NULL) {
         printf("File not detected. Is there an SD card?");
