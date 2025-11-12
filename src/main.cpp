@@ -8,89 +8,47 @@ using namespace pros::c;
 using namespace pros;
 using namespace lemlib;
 
-pros::Controller controller(pros::E_CONTROLLER_MASTER);
-
-pros::MotorGroup leftMotors({5, 4, 3}, pros::MotorGearset::blue); // left motor group  
-pros::MotorGroup rightMotors({6, 9, 7}, pros::MotorGearset::blue); // right motor group
-
-typedef struct MOTOR {
-    int port;
-    pros::motor_gearset_e_t gear;
-} motor_t;
-
 typedef struct portMaster {
     // 14 integers { sizeof(int) 14 }
-    int motor_A; // drivetrain motor
-    int motor_B; // drivetrain motor
-    int motor_C; // drivetrain motor 
-    int motor_D; // drivetrain motor
-    int motor_E; // drivetrain motor
-    int motor_F; // drivetrain motor
-    int motor_G; // intake motor
-    int motor_H; // top agitator motor
-    int motor_I; // bottom agitator motor
-    int motor_J; // scoring motor
-    int IMU_Sensor;
-    int rotational_A;
-    int rotational_B;
-    int coloor_Sensor;
+    int8_t motor_A; // drivetrain motor
+    int8_t motor_B; // drivetrain motor
+    int8_t motor_C; // drivetrain motor 
+    int8_t motor_D; // drivetrain motor
+    int8_t motor_E; // drivetrain motor
+    int8_t motor_F; // drivetrain motor
+    int8_t motor_G; // intake motor
+    int8_t motor_H; // top agitator motor
+    int8_t motor_I; // bottom agitator motor
+    int8_t motor_J; // scoring motor
+    int8_t IMU_Sensor; // intertial sensor
+    int8_t rotational_A; // rotational sensor
+    int8_t rotational_B; // rotational sensor
+    int8_t colour_Sensor; // colour sensor
 } port_t;
 
-int* ConfigData;
+static port_t port = {
+    .motor_A = 1, // drivetrain motor
+    .motor_B = 2, // drivetrain motor
+    .motor_C = 3, // drivetrain motor 
+    .motor_D = 5,// drivetrain motor
+    .motor_E = 9, // drivetrain motor
+    .motor_F = 10, // drivetrain motor
+    .motor_G = 0, // intake motor
+    .motor_H = 0, // top agitator motor
+    .motor_I = 0, // bottom agitator motor
+    .motor_J = 0, // scoring motor
+    .IMU_Sensor = 0, // intertial sensor
+    .rotational_B = 0, // rotational sensor
+    .colour_Sensor = 0 // colour sensor
+};
 
+pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
-/*
-motor_t motor_A {
-    .port = 1,
-    .gear = E_MOTOR_GEAR_BLUE
-}; // PROS API COMPATIBLE
+pros::MotorGroup left_motors({port.motor_A, port.motor_B, port.motor_C}, pros::MotorGearset::blue); // left motors on ports 1, 2, 3
+pros::MotorGroup right_motors({port.motor_D, port.motor_E, port.motor_F}, pros::MotorGearset::blue); // right motors on ports 4, 5, 6
 
-motor_t motor_B {
-    .port = 2,
-    .gear = E_MOTOR_GEAR_BLUE
-}; // PROS API COMPATIBLE
-
-motor_t motor_C {
-    .port = 3,
-    .gear = E_MOTOR_GEAR_BLUE
-}; // PROS API COMPATIBLE
-
-motor_t motor_D {
-    .port = 5,
-    .gear = E_MOTOR_GEAR_BLUE
-}; // PROS API COMPATIBLE
-
-motor_t motor_E {
-    .port = 9,
-    .gear = E_MOTOR_GEAR_BLUE
-}; // PROS API COMPATIBLE
-
-motor_t motor_F {
-    .port = 10,
-    .gear = E_MOTOR_GEAR_BLUE
-}; // PROS API COMPATIBLE
-*/
-
-//pros::Motor(1);
-//pros::MotorGroup left_motors({1, 2, 3}); // left motors on ports 1, 2, 3
-//pros::MotorGroup right_motors({4, 5, 6}); // right motors on ports 4, 5, 6
-
-void MotorSetup(int portA, int portB, int portC, int portD, int portE, int portF) {
-
-    motor_A.port = portA;
-    motor_B.port = portB;
-    motor_C.port = portC;
-    motor_D.port = portD;
-    motor_E.port = portE;
-    motor_F.port = portF;
-}
-
-
-/* void LoadConfig() - not finished
 void LoadConfig() {
     FILE* ConfigFile = fopen("/usd/config.bin", "a+");
-
-
 
     if (ConfigFile == NULL) {
         printf("File not detected. Is there an SD card?");
@@ -98,40 +56,37 @@ void LoadConfig() {
     } 
 
     if (ConfigFile != NULL) {
-        
-        for (int i = 0; i < 6; i++) {
-            switch (i) {
-                case 0:
-                    fread(&motor_A.port, sizeof(int), 1, ConfigFile);
-                    break;
-                case 1:
-                    //
-                    break;
-                case 2:
-                    //
-                    break;
-                case 3:
-                    //
-                    break;
-                case 4:
-                    //
-                    break;
-                case 5:
-                    //
-                    break;
-            }
-        }
+        int items_read = fread(&port, sizeof(port_t), 1, ConfigFile);
+        fclose(ConfigFile);
     }
-    
-}
-*/
-
-void CompileConfig() {
-    printf("Debug:Compiling Config\n");
 }
 
 void UpdateConfig() {
-    printf("Debug:Updating Config\n");
+    FILE* ConfigFile = fopen("/usd/config.bin", "a+");
+
+    if (ConfigFile == NULL) {
+        printf("File not detected. Is there an SD card?");
+        fclose(ConfigFile);
+    } 
+
+    if (ConfigFile != NULL) {
+        int items_read = fwrite(&port, sizeof(port_t), 1, ConfigFile);
+        fclose(ConfigFile);
+    }
+}
+
+/**
+ * Runs initialization code. This occurs as soon as the program is started.
+ *
+ * All other competition modes are blocked by initialize; it is recommended
+ * to keep execution time for this mode under a few seconds.
+ */
+void initialize() {
+    LoadConfig();
+
+    imu_reset(port.IMU_Sensor);
+    rotation_reset(port.rotational_A);
+    rotation_reset(port.rotational_B);
 }
 
 void ScreenSetup() {
@@ -180,17 +135,17 @@ void MAXSET() {
 
 void STOP() {
     //Motor1.stop();
-    motor_brake(motor_A.port);
+    motor_brake(port.motor_A);
     //Motor2.stop();
-    motor_brake(motor_B.port);
+    motor_brake(port.motor_B);
     //Motor3.stop();
-    motor_brake(motor_C.port);
+    motor_brake(port.motor_C);
     //Motor9.stop();
-    motor_brake(motor_D.port);
+    motor_brake(port.motor_D);
     //Motor10.stop();
-    motor_brake(motor_E.port);
+    motor_brake(port.motor_E);
     //Motor5.stop();
-    motor_brake(motor_F.port);
+    motor_brake(port.motor_F);
 } // PROS API COMPATIBLE
 
 /*  void FREEZE() - not yet translated to PROS code
@@ -213,34 +168,34 @@ void DRIVE() {
 }
 */
 
-void starbord(int32_t a) {
+void starboard(int32_t a) {
     //Motor1.setVelocity(a, percent);
-    motor_move_velocity(.motor_A, a);
+    motor_move_velocity(port.motor_A, a);
     //Motor2.setVelocity(a, percent);
-    motor_move_velocity(motor_B, a);
+    motor_move_velocity(port.motor_B, a);
     //Motor3.setVelocity(a, percent);
-    motor_move_velocity(motor_C, a);
+    motor_move_velocity(port.motor_C, a);
 } // PROS API COMPATIBLE
 
 void portside(int32_t a) {
     //Motor9.setVelocity(a, percent);
-    motor_move_velocity(motor_D, a);
+    motor_move_velocity(port.motor_D, a);
     //Motor10.setVelocity(a, percent);
-    motor_move_velocity(motor_E, a);
+    motor_move_velocity(port.motor_E, a);
     //Motor5.setVelocity(a, percent);
-    motor_move_velocity(motor_F, a);
+    motor_move_velocity(port.motor_F, a);
 } // PROS API COMPATIBLE
 
 void TURN() { 
   // turn sets the velocites of the drivetrain so that they will tunr in the applied direction
   portside(controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_RIGHT_X));
-  starbord(controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_RIGHT_X));
+  starboard(controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_RIGHT_X));
 } // PROS API COMPATIBLE
 
 void MOVE() {
   portside(controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y));
   int tmp = controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y) * -1;
-  starbord(tmp);
+  starboard(tmp);
 } // PROS API COMPATIBLE
 
 void DRIVE() {
@@ -254,17 +209,14 @@ void DRIVE() {
     }
 } // PROS API COMPATIBLE
 
-/**
- * Runs initialization code. This occurs as soon as the program is started.
- *
- * All other competition modes are blocked by initialize; it is recommended
- * to keep execution time for this mode under a few seconds.
- */
-void initialize() {
-    imu_reset(IMU_Sensor);
-    rotation_reset(rotational_A);
-    rotation_reset(rotational_B);
+
+void AutoMove(uint32_t velocity) {
+    rotation_reset(port.rotational_A);
+    rotation_reset(port.rotational_B);
+    portside(velocity);
+    starboard(velocity);
 }
+
 
 /**
  * Runs while the robot is in the disabled state of Field Management System or
@@ -322,5 +274,5 @@ void opcontrol() {
         DRIVE();
         delay(2);
     }
-
+    UpdateConfig();
 }
