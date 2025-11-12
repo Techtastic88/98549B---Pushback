@@ -3,6 +3,9 @@
 #include "pros/motors.h"
 #include "lemlib/api.hpp" // IWYU pragma: keep
 #include "pros/motors.hpp" // IWYU pragma: keep
+#include <unistd.h>
+
+#define CIRCUMFRENCE 0.259334
 
 using namespace pros::c;
 using namespace pros;
@@ -46,6 +49,8 @@ pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
 pros::MotorGroup left_motors({port.motor_A, port.motor_B, port.motor_C}, pros::MotorGearset::blue); // left motors on ports 1, 2, 3
 pros::MotorGroup right_motors({port.motor_D, port.motor_E, port.motor_F}, pros::MotorGearset::blue); // right motors on ports 4, 5, 6
+
+static long clock = 0;
 
 void LoadConfig() {
     FILE* ConfigFile = fopen("/usd/config.bin", "a+");
@@ -118,21 +123,6 @@ void startup() {
     }
 } // PROS API COMPATIBLE
 
-/* void MAXSET() - not yet translated to PROS code
-void MAXSET() {
-  Motor1.setVelocity(100, percent);
-  Motor2.setVelocity(100, percent);
-  Motor3.setVelocity(100, percent);
-  Motor9.setVelocity(100, percent);
-  Motor1.setMaxTorque(100, percent);
-  Motor2.setMaxTorque(100, percent);
-  Motor3.setMaxTorque(100, percent);
-  Motor9.setMaxTorque(100, percent);
-  Motor15.setVelocity(100, percent);
-  Motor16.setVelocity(100, percent);
-}
-*/
-
 void STOP() {
     //Motor1.stop();
     motor_brake(port.motor_A);
@@ -147,26 +137,6 @@ void STOP() {
     //Motor5.stop();
     motor_brake(port.motor_F);
 } // PROS API COMPATIBLE
-
-/*  void FREEZE() - not yet translated to PROS code
-void FREEZE() {
-  STOP();
-  Brain.Screen.print("button pressed");
-  wait(5, seconds);
-}
-*/
-
-/* void DRIVE() - obsolete
-void DRIVE() {
-  // drive moves the drivetrain (is dependant on the direction set by TURN() and MOVE())
-  //Motor1.spin(forward);
-  //Motor2.spin(forward);
-  //Motor3.spin(forward);
-  //Motor9.spin(forward);
-  //Motor10.spin(forward);
-  //Motor5.spin(forward);
-}
-*/
 
 void starboard(int32_t a) {
     //Motor1.setVelocity(a, percent);
@@ -205,6 +175,8 @@ void DRIVE() {
     } else {
         if (controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y) != 0) {
             MOVE();
+        } else {
+            STOP();
         }
     }
 } // PROS API COMPATIBLE
@@ -236,7 +208,18 @@ void disabled() {}
  */
 void competition_initialize() {}
 
-
+void TimedAuto() {
+    bool a = true;
+    int t = 0;
+    while(a == true) {
+        // moves forward for 15 seconds 
+        while (t < 15) { // run for 15 seconds
+            AutoMove(100);
+        }
+        t += 1;
+        sleep(1);
+    }
+}
 
 /**
  * Runs the user autonomous code. This function will be started in its own task
@@ -250,7 +233,16 @@ void competition_initialize() {}
  * from where it left off.
  */
 void autonomous() {
-    
+    bool a = true;
+    // moves forwards for one meter (inacuarate because there is no PID)
+    while (a == true) {
+        float rotations = (float)rotation_get_position(port.rotational_A) / 360;
+        float DistanceTraveled = rotations * CIRCUMFRENCE;
+        if (DistanceTraveled < 1) { // if distance traveled(meters) is less than 1
+            AutoMove(100); // move orward for one meter
+        }
+    }
+
 }
 
 /**
