@@ -236,7 +236,7 @@ void autonomous() {
     bool a = true;
     // moves forwards for one meter (inacuarate because there is no PID)
     while (a == true) {
-        float rotations = (float)rotation_get_position(port.rotational_A) / 360;
+        float rotations = (float)rotation_get_position(port.rotational_A) / 300;
         float DistanceTraveled = rotations * CIRCUMFRENCE;
         if (DistanceTraveled < 1) { // if distance traveled(meters) is less than 1
             AutoMove(100); // move orward for one meter
