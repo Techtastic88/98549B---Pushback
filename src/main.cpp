@@ -3,6 +3,9 @@
 #include "pros/motors.h"
 #include "lemlib/api.hpp" // IWYU pragma: keep
 #include "pros/motors.hpp" // IWYU pragma: keep
+#include <unistd.h>
+
+#define CIRCOMFRENCE 0.0508 // meters
 
 using namespace pros::c;
 using namespace pros;
@@ -217,6 +220,10 @@ void AutoMove(uint32_t velocity) {
     starboard(velocity);
 }
 
+int proportional(float distance, float finalDistance, float Kp) {
+    return roundf((((finalDistance - distance) / finalDistance) * 127) * Kp);
+}
+
 
 /**
  * Runs while the robot is in the disabled state of Field Management System or
@@ -250,7 +257,23 @@ void competition_initialize() {}
  * from where it left off.
  */
 void autonomous() {
-    
+
+    for(int i = 0; i < 15; i++) { // run for 15 seconds
+        float rotations = (float)rotation_get_position(port.rotational_A) / 300;
+        float DistanceTraveled = rotations * CIRCOMFRENCE;
+
+        float finalDistance = 1.0;
+        
+        if (DistanceTraveled < finalDistance) {
+            AutoMove(proportional(DistanceTraveled, finalDistance, 0.9));
+        } else {
+            STOP();
+        }
+
+        printf("%d\n", i);
+        fflush(stdout);
+        sleep(1);
+    }
 }
 
 /**
