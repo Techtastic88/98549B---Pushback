@@ -1,4 +1,4 @@
-// N.B. make sure to update trackwidth with teh correct track width
+// N.B. make sure to update trackwidth with the correct track width (line 59)
 #include "main.h" 
 #include "lemlib/pid.hpp"
 #include "pros/misc.h"
@@ -15,7 +15,7 @@ using namespace pros;
 using namespace lemlib;
 
 typedef struct portMaster {
-    // 14 integers { sizeof(int) 14 }
+    // 16 8-bit integers and one char (also 8 bits) total size = 128 bits
     int8_t motor_A; // drivetrain motor
     int8_t motor_B; // drivetrain motor
     int8_t motor_C; // drivetrain motor 
@@ -31,6 +31,7 @@ typedef struct portMaster {
     int8_t rotational_Vertical; // rotational sensor
     int8_t colour_Sensor; // colour sensor
     char ScraperMech;
+    int8_t autoInfo;
 } port_t;
 
 static port_t port = {
@@ -48,7 +49,9 @@ static port_t port = {
     .rotational_Horizontal = 18, // rotational sensor
     .rotational_Vertical = 0, // rotational sensor
     .colour_Sensor = 0, // colour sensor
-    .ScraperMech = 'A'
+    .ScraperMech = 'A',
+    .autoInfo = 1
+
 };
 
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
@@ -473,10 +476,22 @@ void competition_initialize() {}
  * from where it left off.
  */
 void autonomous() {
+    //pthread_create(&ClockThread, NULL, TIMER, NULL); 
 
-    pthread_create(&ClockThread, NULL, TIMER, NULL);
-
-    
+    switch (port.autoInfo) {
+        case 0:
+            Auto_Red_West();
+            break;
+        case 1:
+            Auto_Red_East();
+            break;
+        case 2:
+            Auto_Blue_West();
+            break;
+        case 3:
+            Auto_Blue_East();
+            break;
+    }
 }
 
 /**
