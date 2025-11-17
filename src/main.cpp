@@ -1,4 +1,4 @@
-// N.B. make sure to update trackwidth with teh correct track width (line 59)
+// N.B. make sure to update trackwidth with teh correct track width
 #include "main.h" 
 #include "lemlib/pid.hpp"
 #include "pros/misc.h"
