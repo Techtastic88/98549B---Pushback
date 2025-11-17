@@ -1,11 +1,14 @@
+// N.B. make sure to update trackwidth with teh correct track width (line 59)
 #include "main.h" 
+#include "lemlib/pid.hpp"
 #include "pros/misc.h"
 #include "pros/motors.h"
 #include "lemlib/api.hpp" // IWYU pragma: keep
 #include "pros/motors.hpp" // IWYU pragma: keep
 #include <unistd.h>
+#include <pthread.h>
 
-#define CIRCUMFRENCE 0.259334
+#define CIRCOMFRENCE 0.0508 // meters
 
 using namespace pros::c;
 using namespace pros;
@@ -19,14 +22,15 @@ typedef struct portMaster {
     int8_t motor_D; // drivetrain motor
     int8_t motor_E; // drivetrain motor
     int8_t motor_F; // drivetrain motor
-    int8_t motor_G; // intake motor
+    int8_t motor_Intake; // intake motor
     int8_t motor_H; // top agitator motor
     int8_t motor_I; // bottom agitator motor
-    int8_t motor_J; // scoring motor
+    int8_t motor_Scoring; // scoring motor
     int8_t IMU_Sensor; // intertial sensor
-    int8_t rotational_A; // rotational sensor
-    int8_t rotational_B; // rotational sensor
+    int8_t rotational_Horizontal; // rotational sensor
+    int8_t rotational_Vertical; // rotational sensor
     int8_t colour_Sensor; // colour sensor
+    char ScraperMech;
 } port_t;
 
 static port_t port = {
@@ -36,21 +40,93 @@ static port_t port = {
     .motor_D = 5,// drivetrain motor
     .motor_E = 9, // drivetrain motor
     .motor_F = 10, // drivetrain motor
-    .motor_G = 0, // intake motor
+    .motor_Intake = 0, // intake motor
     .motor_H = 0, // top agitator motor
     .motor_I = 0, // bottom agitator motor
-    .motor_J = 0, // scoring motor
+    .motor_Scoring = 0, // scoring motor
     .IMU_Sensor = 0, // intertial sensor
-    .rotational_A = 18, // rotational sensor
-    .rotational_B = 0, // rotational sensor
-    .colour_Sensor = 0 // colour sensor
+    .rotational_Horizontal = 18, // rotational sensor
+    .rotational_Vertical = 0, // rotational sensor
+    .colour_Sensor = 0, // colour sensor
+    .ScraperMech = 'A'
 };
 
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
-pros::MotorGroup left_motors({port.motor_A, port.motor_B, port.motor_C}, pros::MotorGearset::blue); // left motors on ports 1, 2, 3
-pros::MotorGroup right_motors({port.motor_D, port.motor_E, port.motor_F}, pros::MotorGearset::blue); // right motors on ports 4, 5, 6
+pros::MotorGroup left_motor_group({port.motor_A, port.motor_B, port.motor_C}, pros::MotorGearset::blue); // left motors on ports 1, 2, 3
+pros::MotorGroup right_motor_group({port.motor_D, port.motor_E, port.motor_F}, pros::MotorGearset::blue); // right motors on ports 4, 5, 6
 
+pros::Imu imu(port.IMU_Sensor);
+
+pros::Rotation horizontalEnc(port.rotational_Horizontal);
+pros::Rotation verticalEnc(port.rotational_Vertical);
+
+lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::OLD_275, 0);
+lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_2, 0);
+
+lemlib::Drivetrain drivetrain(&left_motor_group, // left motor group
+                            &right_motor_group, // right motor group
+                            10, // 10 inch track width 
+                            lemlib::Omniwheel::NEW_325, // using new 3.25" omnis
+                            450, // drivetrain rpm is 450
+                            2 // horizontal drift is 2 (for now)
+);
+// lateral motion controller
+lemlib::ControllerSettings linearController(10, // proportional gain (kP)
+                                            0, // integral gain (kI)
+                                            3, // derivative gain (kD)
+                                            3, // anti windup
+                                            1, // small error range, in inches
+                                            100, // small error range timeout, in milliseconds
+                                            3, // large error range, in inches
+                                            500, // large error range timeout, in milliseconds
+                                            20 // maximum acceleration (slew)
+);
+// angular motion controller
+lemlib::ControllerSettings angularController(2, // proportional gain (kP)
+                                            0, // integral gain (kI)
+                                            10, // derivative gain (kD)
+                                            3, // anti windup
+                                            1, // small error range, in degrees
+                                            100, // small error range timeout, in milliseconds
+                                            3, // large error range, in degrees
+                                            500, // large error range timeout, in milliseconds
+                                            0 // maximum acceleration (slew)
+);
+
+lemlib::OdomSensors sensors(&vertical, // vertical tracking wheel
+                            nullptr, // vertical tracking wheel 2, set to nullptr as we don't have a second one
+                            &horizontal, // horizontal tracking wheel
+                            nullptr, // horizontal tracking wheel 2, set to nullptr as we don't have a second one
+                            &imu // inertial sensor
+);
+
+lemlib::ExpoDriveCurve throttleCurve(3, // joystick deadband out of 127
+                                     10, // minimum output where drivetrain will move out of 127
+                                     1.019 // expo curve gain
+);
+
+// input curve for steer input during driver control
+lemlib::ExpoDriveCurve steerCurve(3, // joystick deadband out of 127
+                                  10, // minimum output where drivetrain will move out of 127
+                                  1.019 // expo curve gain
+);
+
+// create the chassis
+lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors, &throttleCurve, &steerCurve);
+
+/* deactivate FOR NOW
+PID pid(5, // kP
+        0.01, // kI
+        20, // kD
+        5, // integral anti windup range
+        false); // don't reset integral when sign of error flips
+*/
+
+
+bool IsAutonomousRunning = true;
+
+pthread_t ClockThread;
 
 void LoadConfig() {
     FILE* ConfigFile = fopen("/usd/config.bin", "a+");
@@ -80,6 +156,42 @@ void UpdateConfig() {
     }
 }
 
+void DrivetrainSetBrakeMode(motor_brake_mode_e_t mode) {
+    motor_set_brake_mode(port.motor_A, mode);
+    motor_set_brake_mode(port.motor_B, mode);
+    motor_set_brake_mode(port.motor_C, mode);
+    motor_set_brake_mode(port.motor_D, mode);
+    motor_set_brake_mode(port.motor_E, mode);
+    motor_set_brake_mode(port.motor_F, mode);
+}
+
+void LEMLIB_INNIT() {
+    pros::lcd::initialize(); // initialize brain screen
+    chassis.calibrate(); // calibrate sensors
+
+    // the default rate is 50. however, if you need to change the rate, you
+    // can do the following.
+    // lemlib::bufferedStdout().setRate(...);
+    // If you use bluetooth or a wired connection, you will want to have a rate of 10ms
+
+    // for more information on how the formatting for the loggers
+    // works, refer to the fmtlib docs
+
+    // thread to for brain screen and position logging
+    pros::Task screenTask([&]() {
+        while (true) {
+            // print robot location to the brain screen
+            pros::lcd::print(0, "X: %f", chassis.getPose().x); // x
+            pros::lcd::print(1, "Y: %f", chassis.getPose().y); // y
+            pros::lcd::print(2, "Theta: %f", chassis.getPose().theta); // heading
+            // log position telemetry
+            lemlib::telemetrySink()->info("Chassis pose: {}", chassis.getPose());
+            // delay to save resources
+            pros::delay(50);
+        }
+    });
+}
+
 /**
  * Runs initialization code. This occurs as soon as the program is started.
  *
@@ -87,11 +199,15 @@ void UpdateConfig() {
  * to keep execution time for this mode under a few seconds.
  */
 void initialize() {
-    LoadConfig();
 
+    LEMLIB_INNIT();
+
+    LoadConfig();
+    DrivetrainSetBrakeMode(E_MOTOR_BRAKE_BRAKE);
+    adi_port_set_config(port.ScraperMech, E_ADI_DIGITAL_OUT);
     imu_reset(port.IMU_Sensor);
-    rotation_reset(port.rotational_A);
-    rotation_reset(port.rotational_B);
+    rotation_reset(port.rotational_Horizontal);
+    rotation_reset(port.rotational_Vertical);
 }
 
 void ScreenSetup() {
@@ -138,6 +254,16 @@ void STOP() {
     motor_brake(port.motor_F);
 } // PROS API COMPATIBLE
 
+void DrivetrainBrake() {
+    DrivetrainSetBrakeMode(E_MOTOR_BRAKE_COAST);
+    STOP();
+    DrivetrainSetBrakeMode(E_MOTOR_BRAKE_BRAKE);
+    STOP();
+    DrivetrainSetBrakeMode(E_MOTOR_BRAKE_HOLD);
+    STOP();
+    DrivetrainSetBrakeMode(E_MOTOR_BRAKE_COAST);
+} // PROS API COMPATIBLE
+
 void starboard(int32_t a) {
     //Motor1.setVelocity(a, percent);
     motor_move_velocity(port.motor_A, a);
@@ -181,12 +307,137 @@ void DRIVE() {
     }
 } // PROS API COMPATIBLE
 
+void ScraperMech() {
+    static bool ScraperState = false;
+    if (ScraperState == false) {
+        ScraperState = true;
+        adi_digital_write(port.ScraperMech, ScraperState);
+    } else {
+        ScraperState = false;
+        adi_digital_write(port.ScraperMech, ScraperState);
+    }
+} // PROS API COMPATIBLE
+
+void IntakeControl() {
+    float R1Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_R1);
+    float R2Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_R2);
+    if (R1Trigger == true) {
+        motor_move_velocity(port.motor_Intake, 127);
+    }
+    if (R1Trigger == true) {
+        motor_move_velocity(port.motor_Intake, -127);
+    }
+    if (R1Trigger != true && R2Trigger != true) {
+        DrivetrainSetBrakeMode(pros::E_MOTOR_BRAKE_COAST);
+        motor_brake(port.motor_Intake);
+    }
+} // PROS API COMPATIBLE
+
+void ScoringControl() {
+    float L1Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_L1);
+    float L2Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_L2);
+
+    if (L1Trigger == true) {
+        motor_move_velocity(port.motor_Scoring, 127);
+    }
+    if (L1Trigger == true) {
+        motor_move_velocity(port.motor_Scoring, -127);
+    }
+    if (L1Trigger != true && L2Trigger != true) {
+        DrivetrainSetBrakeMode(pros::E_MOTOR_BRAKE_COAST);
+        motor_brake(port.motor_Scoring);
+    }
+} // PROS API COMPATIBLE
+
+void MiscControl() {
+    float Ybutton = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_Y);
+    static bool prev = false;
+    static bool interupt = false;
+
+    if (prev != Ybutton) {
+        interupt = true;
+        if (prev == true) {
+            prev = false;
+        } else {
+            prev = true;
+        }
+    } else {
+        interupt = false;
+    }
+
+    if (Ybutton == true && interupt == true) {
+        ScraperMech();
+    }
+} // PROS API COMPATIBLE
 
 void AutoMove(uint32_t velocity) {
-    rotation_reset(port.rotational_A);
-    rotation_reset(port.rotational_B);
+    rotation_reset(port.rotational_Horizontal);
+    rotation_reset(port.rotational_Vertical);
     portside(velocity);
     starboard(velocity);
+}
+
+int proportional(float error, float finalDistance, float Kp) {
+    return roundf(((error / finalDistance) * 127) * Kp);
+}
+
+void *TIMER(void *garbage) {
+    for (int i = 0; i < 5; i++) {
+        //printf("%d\n", i);
+        //fflush(stdout);
+        sleep(1);
+    }
+    IsAutonomousRunning = false;
+    return NULL;
+}
+
+void CustomAutoUnusedCode() {
+    while(IsAutonomousRunning == true) { // run for 15 seconds
+        float rotations = (float)rotation_get_position(port.rotational_Horizontal) / 300; // get the amount of rotations
+        float DistanceTraveled = rotations * CIRCOMFRENCE; // convert rotations to distance traveled
+        float finalDistance = 1.0; // store the target distance
+        float error = finalDistance - DistanceTraveled; // compute error value
+        
+        if (DistanceTraveled < finalDistance) {
+            //AutoMove(proportional(error, finalDistance, 0.9));
+            //float output = pid.update(error); deactivated for now
+            // AutoMove(output); deactivated for now
+        } else {
+            STOP();
+        }
+    }
+}
+
+/*N.B. Functions Auto_Red_West, Auto_Blue_West and Auto_Blue_east are not finished.
+In order to prevent compile time errors and to make them easier to find I have changed their types from void to void(*).
+Note to self: Remember to change them to back to void once you have finished programing them.
+    ~Tristan
+*/
+
+void *Auto_Red_West() {
+    return NULL;
+}
+
+void Auto_Red_East() {
+    chassis.moveToPoint(-600, -600, 4000);
+    chassis.moveToPoint(-1200, -600, 4000, {.forwards = false});
+
+    chassis.turnToHeading(90, 4000);
+
+    chassis.moveToPoint(-1200, -1200, 4000);
+
+    chassis.turnToHeading(90, 4000);
+    // TODO move scraper down
+    // TODO run intake
+    chassis.moveToPoint(-1600, -1200, 4000);
+}
+
+void *Auto_Blue_West() {
+    return NULL;
+}
+
+void *Auto_Blue_East() {
+    return NULL;
 }
 
 
@@ -208,18 +459,7 @@ void disabled() {}
  */
 void competition_initialize() {}
 
-void TimedAuto() {
-    bool a = true;
-    int t = 0;
-    while(a == true) {
-        // moves forward for 15 seconds 
-        while (t < 15) { // run for 15 seconds
-            AutoMove(100);
-        }
-        t += 1;
-        sleep(1);
-    }
-}
+
 
 /**
  * Runs the user autonomous code. This function will be started in its own task
@@ -233,16 +473,10 @@ void TimedAuto() {
  * from where it left off.
  */
 void autonomous() {
-    bool a = true;
-    // moves forwards for one meter (inacuarate because there is no PID)
-    while (a == true) {
-        float rotations = (float)rotation_get_position(port.rotational_A) / 300;
-        float DistanceTraveled = rotations * CIRCUMFRENCE;
-        if (DistanceTraveled < 1) { // if distance traveled(meters) is less than 1
-            AutoMove(100); // move orward for one meter
-        }
-    }
 
+    pthread_create(&ClockThread, NULL, TIMER, NULL);
+
+    
 }
 
 /**
@@ -264,6 +498,8 @@ void opcontrol() {
 
     while (true) {
         DRIVE();
+        IntakeControl();
+        ScoringControl();
         delay(2);
     }
     UpdateConfig();
