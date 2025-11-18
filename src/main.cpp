@@ -1,4 +1,14 @@
-// N.B. make sure to update trackwidth with the correct track width (line 59)
+/*
+Code Explination
+
+Note we use both C++ API and C API. C for readability and simplicity C++ for lemlib pid and odometry functions.
+
+Create a structure that contains all the primary information of the program
+this includes ports, and autonomous information. This has two main uses, the first one is so that we can easily pass this information into the config file.
+The second one is so that we can easily call the port information without having to consult a table. Because we use C API there are no objects for motors,
+instead we simply use funtions that take a port as an input such as motor_move(port, voltage);. Without using some data structure to organize the port numbers working in C API would go from being
+simpler and more readable than C++ APT to being a pain in the ass to work with. 
+*/
 #include "main.h" 
 #include "lemlib/pid.hpp"
 #include "pros/misc.h"
@@ -7,8 +17,14 @@
 #include "pros/motors.hpp" // IWYU pragma: keep
 #include <unistd.h>
 #include <pthread.h>
+#include <stdint.h>
 
 #define CIRCOMFRENCE 0.0508 // meters
+
+#define RED 0
+#define BLUE 240
+
+#define Pi 3.141592
 
 using namespace pros::c;
 using namespace pros;
@@ -23,7 +39,7 @@ typedef struct portMaster {
     int8_t motor_E; // drivetrain motor
     int8_t motor_F; // drivetrain motor
     int8_t motor_Intake; // intake motor
-    int8_t motor_H; // top agitator motor
+    int8_t motor_Sort; // colour sorting motor
     int8_t motor_I; // bottom agitator motor
     int8_t motor_Scoring; // scoring motor
     int8_t IMU_Sensor; // intertial sensor
@@ -42,7 +58,7 @@ static port_t port = {
     .motor_E = 9, // drivetrain motor
     .motor_F = 10, // drivetrain motor
     .motor_Intake = 0, // intake motor
-    .motor_H = 0, // top agitator motor
+    .motor_Sort = 12, // colour sorting motor
     .motor_I = 0, // bottom agitator motor
     .motor_Scoring = 0, // scoring motor
     .IMU_Sensor = 0, // intertial sensor
@@ -53,6 +69,12 @@ static port_t port = {
     .autoInfo = 1
 
 };
+
+/*
+The next few lines are written in C++ rather than C. The reason for this is that they are initailization statments that lemlib needs to work.
+The reason why we use lemlib is because programing PID and odometry is very complex and time consuming so we use lemlib to simplify it.
+We however do not us lemlib for driving as programming split arcade drive is fairly strightforward. 
+*/
 
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
@@ -126,10 +148,12 @@ PID pid(5, // kP
         false); // don't reset integral when sign of error flips
 */
 
-
+// this is not currently in use 
 bool IsAutonomousRunning = true;
 
 pthread_t ClockThread;
+
+float speedMod = 0.8;
 
 void LoadConfig() {
     FILE* ConfigFile = fopen("/usd/config.bin", "a+");
@@ -292,9 +316,10 @@ void TURN() {
 } // PROS API COMPATIBLE
 
 void MOVE() {
-  portside(controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y));
-  int tmp = controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y) * -1;
-  starboard(tmp);
+    int tmp = (controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y) / 127) * 600;
+    portside(tmp * speedMod);
+    int tmp2 = (controller_get_analog(E_CONTROLLER_MASTER, pros::E_CONTROLLER_ANALOG_LEFT_Y) / 127) * -600;
+    starboard(tmp2 * speedMod);
 } // PROS API COMPATIBLE
 
 void DRIVE() {
@@ -324,14 +349,13 @@ void ScraperMech() {
 void IntakeControl() {
     float R1Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_R1);
     float R2Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_R2);
-    if (R1Trigger == true) {
-        motor_move_velocity(port.motor_Intake, 127);
+    if (R1Trigger == 1) {
+        motor_move(port.motor_Intake, 127);
     }
-    if (R1Trigger == true) {
-        motor_move_velocity(port.motor_Intake, -127);
+    if (R2Trigger == 1) {
+        motor_move(port.motor_Intake, -127);
     }
-    if (R1Trigger != true && R2Trigger != true) {
-        DrivetrainSetBrakeMode(pros::E_MOTOR_BRAKE_COAST);
+    if (R1Trigger != 1 && R2Trigger != 1) {
         motor_brake(port.motor_Intake);
     }
 } // PROS API COMPATIBLE
@@ -341,10 +365,10 @@ void ScoringControl() {
     float L2Trigger = controller_get_digital(E_CONTROLLER_MASTER, E_CONTROLLER_DIGITAL_L2);
 
     if (L1Trigger == true) {
-        motor_move_velocity(port.motor_Scoring, 127);
+        motor_move(port.motor_Scoring, 127);
     }
-    if (L1Trigger == true) {
-        motor_move_velocity(port.motor_Scoring, -127);
+    if (L2Trigger == true) {
+        motor_move(port.motor_Scoring, -127);
     }
     if (L1Trigger != true && L2Trigger != true) {
         DrivetrainSetBrakeMode(pros::E_MOTOR_BRAKE_COAST);
@@ -384,6 +408,17 @@ int proportional(float error, float finalDistance, float Kp) {
     return roundf(((error / finalDistance) * 127) * Kp);
 }
 
+void ColorSort() {
+    if (optical_get_hue(port.colour_Sensor) == BLUE) {
+        delay(50);
+        motor_move(port.motor_Sort, -127);
+    }
+    if (optical_get_hue(port.colour_Sensor) == RED) {
+        motor_move(port.motor_Sort, 127);
+        delay(50);
+    }
+}
+
 void *TIMER(void *garbage) {
     for (int i = 0; i < 5; i++) {
         //printf("%d\n", i);
@@ -418,6 +453,15 @@ Note to self: Remember to change them to back to void once you have finished pro
 */
 
 void *Auto_Red_West() {
+    chassis.moveToPoint(0, 0, 5000);
+    chassis.moveToPoint(6.87, 34.582, 5000);
+    chassis.moveToPoint(6.832, 42.085, 5000);
+    chassis.moveToPoint(32.103, 10.807, 5000);
+    chassis.moveToPoint(31.974, 3.279, 5000);
+    chassis.moveToPoint(41.573, 16.71, 5000);
+    chassis.moveToPoint(49.19, 16.943, 5000);
+    chassis.moveToPoint(31.371, 29.554, 5000);
+    chassis.moveToPoint(31.644, 37.662, 5000);
     return NULL;
 }
 
@@ -433,13 +477,44 @@ void Auto_Red_East() {
     // TODO move scraper down
     // TODO run intake
     chassis.moveToPoint(-1600, -1200, 4000);
+
+    // generated 
+
+    chassis.moveToPoint(0, 0, 5000);
+    chassis.moveToPoint(-6.87, 34.582, 5000);
+    chassis.moveToPoint(-6.832, 42.085, 5000);
+    chassis.moveToPoint(-32.103, 10.807, 5000);
+    chassis.moveToPoint(-31.974, 3.279, 5000);
+    chassis.moveToPoint(-41.573, 16.71, 5000);
+    chassis.moveToPoint(-49.19, 16.943, 5000);
+    chassis.moveToPoint(-31.371, 29.554, 5000);
+    chassis.moveToPoint(-31.644, 37.662, 5000);
+
 }
 
 void *Auto_Blue_West() {
+    chassis.moveToPoint(0, 0, 5000);
+    chassis.moveToPoint(6.87, 34.582, 5000);
+    chassis.moveToPoint(6.832, 42.085, 5000);
+    chassis.moveToPoint(32.103, 10.807, 5000);
+    chassis.moveToPoint(31.974, 3.279, 5000);
+    chassis.moveToPoint(41.573, 16.71, 5000);
+    chassis.moveToPoint(49.19, 16.943, 5000);
+    chassis.moveToPoint(31.371, 29.554, 5000);
+    chassis.moveToPoint(31.644, 37.662, 5000);
     return NULL;
 }
 
 void *Auto_Blue_East() {
+    chassis.moveToPoint(0, 0, 5000);
+    chassis.moveToPoint(-6.87, 34.582, 5000);
+    chassis.moveToPoint(-6.832, 42.085, 5000);
+    chassis.moveToPoint(-32.103, 10.807, 5000);
+    chassis.moveToPoint(-31.974, 3.279, 5000);
+    chassis.moveToPoint(-41.573, 16.71, 5000);
+    chassis.moveToPoint(-49.19, 16.943, 5000);
+    chassis.moveToPoint(-31.371, 29.554, 5000);
+    chassis.moveToPoint(-31.644, 37.662, 5000);
     return NULL;
 }
 
